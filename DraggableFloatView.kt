@@ -3,6 +3,9 @@ package com.general.view
 import android.animation.Animator
 import android.annotation.SuppressLint
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import android.os.Message
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
@@ -31,9 +34,33 @@ class DraggableFloatView @JvmOverloads constructor(
     private val marginTop = 0f
     private val marginBottom = 0f
     private val array = intArrayOf(0, 0)
-    private var state = State.COLLAPSE
+    private var state = State.EXPAND //默认展开
     private var isMove = false
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+    private var canHide = false
+    private val hideHandler = object : Handler(Looper.getMainLooper()) {
+        override fun handleMessage(msg: Message) {
+            if (canHide) {
+                val viewParent = parent as View
+                val parentWidth = viewParent.width
+                val xMiddle = parentWidth / 2
+                val xMax = parentWidth - width
+                if (x >= xMiddle) {
+                    animate()
+                        .x(xMax + width * 2 / 3f)
+                        .setDuration(DURATION_MILLIS)
+                        .setListener(this@DraggableFloatView)
+                        .start()
+                } else {
+                    animate()
+                        .x(-width * 2 / 3f)
+                        .setDuration(DURATION_MILLIS)
+                        .setListener(this@DraggableFloatView)
+                        .start()
+                }
+            }
+        }
+    }
 
     private enum class State {
         EXPAND, COLLAPSE, SETTING,
@@ -59,13 +86,13 @@ class DraggableFloatView @JvmOverloads constructor(
                 widgetInitialX = x
                 widgetInitialY = y
                 isMove = false
-                handler.removeCallbacksAndMessages(null)
+                hideHandler.removeMessages(0)
             }
             MotionEvent.ACTION_MOVE -> {
                 var newX = event.rawX + widgetDX
                 var newY = event.rawY + widgetDY
-                newX = max(if (state == State.COLLAPSE) -width / 2f else 0f, newX)
-                newX = min(if (state == State.COLLAPSE) xMax + width / 2 else xMax, newX)
+                newX = max(if (state == State.COLLAPSE) -width * 2 / 3f else 0f, newX)
+                newX = min(if (state == State.COLLAPSE) xMax + width * 2 / 3f else xMax, newX)
                 newY = max(marginTop, newY)
                 newY = min(yMax, newY)
                 if (abs(newX - widgetInitialX) > touchSlop || abs(newY - widgetInitialY) > touchSlop) {
@@ -84,14 +111,16 @@ class DraggableFloatView @JvmOverloads constructor(
                         animate().x(0f).setDuration(DURATION_MILLIS).setListener(this).start()
                     }
                     if (!isMove && x == widgetInitialX && y == widgetInitialY) {
-                        children.forEach {
-                            if (it.isVisible) {
-                                it.getLocationInWindow(array)
-                                val maxX = it.measuredWidth + array[0]
-                                val maxY = it.measuredHeight + array[1]
-                                if (event.rawX.toInt() in array[0]..maxX && event.rawY.toInt() in array[1]..maxY) {
-                                    it.performClick()
-                                    return@forEach
+                        children.run breaking@{
+                            forEach {
+                                if (it.isVisible) {
+                                    it.getLocationInWindow(array)
+                                    val maxX = it.measuredWidth + array[0]
+                                    val maxY = it.measuredHeight + array[1]
+                                    if (event.rawX.toInt() in array[0]..maxX && event.rawY.toInt() in array[1]..maxY) {
+                                        it.performClick()
+                                        return@breaking
+                                    }
                                 }
                             }
                         }
@@ -103,23 +132,11 @@ class DraggableFloatView @JvmOverloads constructor(
                         animate().x(0f).setDuration(DURATION_MILLIS).setListener(this).start()
                     }
                 }
-                handler.postDelayed(hideRunnable, 3_000)
+                hideHandler.sendEmptyMessageDelayed(0, 3_000)
             }
             else -> return false
         }
         return true
-    }
-
-    private val hideRunnable = Runnable {
-        val viewParent = parent as View
-        val parentWidth = viewParent.width
-        val xMiddle = parentWidth / 2
-        val xMax = parentWidth - width
-        if (x >= xMiddle) {
-            animate().x(xMax + width / 2f).setDuration(DURATION_MILLIS).setListener(this).start()
-        } else {
-            animate().x(-width / 2f).setDuration(DURATION_MILLIS).setListener(this).start()
-        }
     }
 
     override fun onAnimationStart(animation: Animator?) {
@@ -141,7 +158,30 @@ class DraggableFloatView @JvmOverloads constructor(
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
-        handler.removeCallbacksAndMessages(null)
+        hideHandler.removeCallbacksAndMessages(null)
         animate().cancel()
+    }
+
+    fun setHideEnable(value: Boolean) {
+        if (canHide != value) {
+            canHide = value
+            if (value) {
+                hideHandler.removeMessages(0)
+                hideHandler.sendEmptyMessageDelayed(0, 3_000)
+            }
+        }
+    }
+
+    fun expand() {
+        if (state == State.COLLAPSE) {
+            if (x < 0f) {
+                animate().x(0f).setDuration(DURATION_MILLIS).setListener(this).start()
+            } else {
+                val viewParent = parent as View
+                val parentWidth = viewParent.width
+                val xMax = parentWidth.toFloat() - width
+                animate().x(xMax).setDuration(DURATION_MILLIS).setListener(this).start()
+            }
+        }
     }
 }
